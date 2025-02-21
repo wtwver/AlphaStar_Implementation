@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 from pysc2 import run_configs
 from absl import flags
 flags.FLAGS([__file__])
