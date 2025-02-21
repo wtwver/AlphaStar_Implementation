@@ -25,7 +25,9 @@ arguments = parser.parse_args()
 
 class Trajectory(object):
 	def __init__(self, source, saving_path, home_race_name, away_race_name, replay_filter, filter_repeated_camera_moves=False):
-		self.source = source
+		self.replay_path = os.path.expanduser(source) if source.startswith('~') else os.path.abspath(source)
+		self.saving_path = os.path.expanduser(saving_path) if saving_path.startswith('~') else os.path.abspath(saving_path)
+
 		self.home_race_name = home_race_name
 		self.away_race_name = away_race_name
 		self.replay_filter = replay_filter
@@ -53,7 +55,8 @@ class Trajectory(object):
 		self.away_trajectory = []
 		self.away_score_cumulative = None
 
-		saving_folder_existence = os.path.isdir(saving_path)
+		print(self.saving_path)
+		saving_folder_existence = os.path.isdir(self.saving_path)
 		assert saving_folder_existence, "saving folder is not existed"
 
 	def get_BO(self, player):
@@ -74,14 +77,14 @@ class Trajectory(object):
 		sc2_proc = run_config.start()
 		controller = sc2_proc.controller
 
-		print(os.listdir(self.source))
-		replay_files = [ f for f in os.listdir(self.source) if f.endswith('.SC2Replay') ]
+		replay_files = [ f for f in os.listdir(self.replay_path) if f.endswith('.SC2Replay') ]
 		print(replay_files)
 		assert len(replay_files) != 0, "No replay file is found"
 
+
 		for replay_file in replay_files:
 			try: 
-				replay_data = run_config.replay_data(self.source + '/' + replay_file)
+				replay_data = run_config.replay_data(self.replay_path + '/' + replay_file)
 				ping = controller.ping()
 				info = controller.replay_info(replay_data)
 				print(info)
@@ -253,7 +256,6 @@ class Trajectory(object):
 				                       discount=discount, observation=agent_obs)
 
 					if _state == StepType.LAST:
-						print("===", arguments.saving_path)
 						data = {'home_feature_screen': self.home_feature_screen, 
 							'home_feature_minimap': self.home_feature_minimap, 
 							'home_player': self.home_player,
@@ -285,7 +287,7 @@ class Trajectory(object):
 
 						with gzip.open(arguments.saving_path + '/' + replay_file + '.pkl', 'wb') as f:
 							pickle.dump(data, f)
-						print("===pickle saved")
+							print("===pickle saved", f)
 
 						break
 
@@ -294,7 +296,6 @@ class Trajectory(object):
 				#self.home_BO = build_info
 				#self.away_BU = score_cumulative_dict
 			except Exception as e:
-				print(f"===error300: {str(e)}")
 				print(f"Error occurred at line: {e.__traceback__.tb_lineno}")
 				
 

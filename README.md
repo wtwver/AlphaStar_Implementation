@@ -1,8 +1,6 @@
 python run_sl.py --workspace_path ~/AlphaStar_Implementation/ --model_name fullyconv --training True --gpu_use True --learning_rate 0.0001 --replay_hkl_file_path ~/AlphaStar_Implementation/hkl/h/ --environment Simple64
 
-python trajectory_generator.py --replay_path ./replay/r/ --saving_path ./hkl/h/
-
-python run_supervised_learning.py --workspace_path ~/AlphaStar_Implementation/ --model_name fullyconv --training True --gpu_use True --learning_rate 0.0001 --replay_hkl_file_path ~/AlphaStar_Implementation/saving/ --environment Simple64
+python trajectory_generator.py --replay_path ../replay/ --saving_path ../hkl/h/
 
 # Install
 uv venv --python=3.9
