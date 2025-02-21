@@ -1,3 +1,13 @@
+python run_sl.py --workspace_path ~/AlphaStar_Implementation/ --model_name fullyconv --training True --gpu_use True --learning_rate 0.0001 --replay_hkl_file_path ~/AlphaStar_Implementation/hkl/h --environment Simple64
+
+python trajectory_generator.py --replay_path ./replay/r/ --saving_path ./hkl/h/
+
+python run_supervised_learning.py --workspace_path ~/AlphaStar_Implementation/ --model_name fullyconv --training True --gpu_use True --learning_rate 0.0001 --replay_hkl_file_path ~/AlphaStar_Implementation/saving/ --environment Simple64
+
+# Install
+uv venv --python=3.9
+uv pip install tensorflow[and-cuda] matplotlib tf-keras pysc2==3.0 sci-klearn hickle
+
 # Introduction
 This repository is for Deep Learning agent of Starcraft2. It is very similar to AlphaStar of DeepMind except size of network. I only test my code with Minigame, Simple64 map of PySC2. However, I am sure this code will work at more large scale game if network size is grown.
 
@@ -11,9 +21,6 @@ This repository is for Deep Learning agent of Starcraft2. It is very similar to 
 ## Python
 1. Python3.7 or 3.8
 2. PySC2 3.0.0: https://github.com/deepmind/pysc2
-3. Tensorflow-gpu 2.3.0
-4. Tensorflow-probability 0.11.0
-5. Hickle 4.0.4
 6. Pygame 1.9.6
 7. Sklearn
 8. ZeroMQ
