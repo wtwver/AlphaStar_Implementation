@@ -97,20 +97,14 @@ class Trajectory(object):
 				home_race = race_list.index(self.home_race_name) + 1
 				if (home_race == player0_race):
 					pass
-					#print("player0_race pass")
-					#continue
 				else:
 					print("player0_race fail")
 					continue
 
 				if (player0_mmr >= self.replay_filter):
 					pass
-					#print("player0_mmr pass")
-					#continue
 				else:
 					pass
-					#print("player0_mmr fail")
-					#break
 				
 				player1_race = info.player_info[1].player_info.race_actual
 				player1_mmr = info.player_info[1].player_mmr
@@ -120,20 +114,14 @@ class Trajectory(object):
 				away_race = race_list.index(self.away_race_name) + 1
 				if (away_race == player1_race):
 					pass
-					#print("player1_race pass ")
-					#continue
 				else:
 					print("===player1_race fail ")
 					continue
 
 				if (player1_mmr >= self.replay_filter):
 					pass
-					#print("player1_mmr pass ")
-					#continue
 				else:
 					pass
-					#print("player1_mmr fail")
-					#continue
 				
 				screen_size_px = (32, 32)
 				minimap_size_px = (32, 32)

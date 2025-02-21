@@ -165,20 +165,18 @@ class TrajectoryDataset(Dataset):
         return self.num_trajectories
 
     def __getitem__(self, idx):
-        # Randomly pick a replay file
         replay_files = [ f for f in os.listdir(args.replay_hkl_file_path) if f.endswith('.pkl') ]
         replay_file = random.choice(replay_files)
-        print(replay_files)
-        print(replay_file)
         
         try:
             with gzip.open(args.replay_hkl_file_path + replay_file) as f:
                 replay = pickle.load(f)
+            print(replay_file)
         except Exception as e:
             print(e)
             # If failed, pick another sample recursively (or return zeros)
             return self.__getitem__(idx)
-        
+
         # Prepare lists for each feature in the trajectory.
         # (Here we follow the structure of the TF generator.)
         feature_screen_list = []
@@ -329,7 +327,7 @@ def supervised_replay(batch_sample, memory_state, carry_state):
             "carry_state": carry_state,
             "game_loop": batch_sample["game_loop"][t].unsqueeze(0),
             "available_actions": batch_sample["available_actions"][t].unsqueeze(0),
-            "last_action_type": batch_sample["last_action_type"][t].unsqueeze(0),
+            "act_history": batch_sample["last_action_type"][t].unsqueeze(0),
             "build_queue": batch_sample["build_queue"][t].unsqueeze(0),
             "single_select": batch_sample["single_select"][t].unsqueeze(0),
             "multi_select": batch_sample["multi_select"][t].unsqueeze(0),
@@ -340,7 +338,7 @@ def supervised_replay(batch_sample, memory_state, carry_state):
         # 'fn_out': [1, num_fn] logits,
         # 'args_out': a dict mapping each arg_type to logits [1, arg_dim],
         # 'final_memory_state', 'final_carry_state'
-        output = model(input_dict)
+        output = model(**input_dict)
         fn_logits = output['fn_out']  # shape [1, num_fn]
         args_out = output['args_out']  # dict mapping argument type -> [1, arg_size]
         memory_state = output['final_memory_state']
@@ -385,6 +383,7 @@ def supervised_train(dataloader, training_episodes):
     step_length = 8
     model.train()
     for epoch in range(training_episodes):
+        print("Epoch: {}".format(epoch))
         for sample in dataloader:
             # sample is a dict with numpy arrays; convert them to torch tensors.
             batch_sample = {
@@ -392,27 +391,31 @@ def supervised_train(dataloader, training_episodes):
                 for key, value in sample.items()
             }
             # Get the trajectory length, assume it is the first dimension.
-            T_total = batch_sample["feature_screen"].shape[0]
+            print(batch_sample["feature_screen"].shape)
+            T_total = batch_sample["feature_screen"].shape[1]
             # Initialize latent states (assume dimensions [1, state_dim])
             memory_state = torch.zeros(1, 1024, device=device)
             carry_state = torch.zeros(1, 1024, device=device)
             # Unroll over the trajectory in chunks of step_length.
             for t in range(0, T_total, step_length):
                 # Make sure we have a full step_length (skip incomplete segments).
+                print('t: {}, step_length: {}, T_total: {}'.format(t, step_length, T_total))
                 if t + step_length > T_total:
+                    print('t + step_length > T_total')
                     break
                 # Slice the segment.
                 segment = {key: batch_sample[key][t:t+step_length] for key in batch_sample}
                 optimizer.zero_grad()
                 loss, memory_state, carry_state = supervised_replay(segment, memory_state, carry_state)
+                print("loss: {:.4f}".format(loss.item()))
                 loss.backward()
                 optimizer.step()
 
                 training_step += 1
                 print("training_step: {} loss: {:.4f}".format(training_step, loss.item()))
-                if training_step % 250 == 0:
+                if training_step % 2 == 0:
                     writer.add_scalar("total_loss", loss.item(), training_step)
-                if training_step % 5000 == 0:
+                if training_step % 2 == 0:
                     save_path = os.path.join(args.workspace_path, "Models", "supervised_model_{}".format(training_step))
                     torch.save(model.state_dict(), save_path)
                 # (Optional) free GPU memory, if necessary.
