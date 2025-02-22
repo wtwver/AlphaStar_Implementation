@@ -7,6 +7,32 @@ from pysc2.lib import actions
 # _NUM_FUNCTIONS is defined based on the available actions.
 _NUM_FUNCTIONS = len(actions.FUNCTIONS)
 
+class SpatialEncoder(nn.Module):
+    def __init__(self, height, width, channel):
+        super(SpatialEncoder, self).__init__()
+        self.height = height
+        self.width = width
+        self.channel = channel
+        
+        self.network = nn.Sequential(
+            nn.LazyConv2d(out_channels=channel, kernel_size=1, padding=0),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(channel, channel, kernel_size=5, padding=2),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(channel, channel * 2, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True)
+        )
+
+    def get_config(self):
+        return {
+            'height': self.height,
+            'width': self.width,
+            'channel': self.channel
+        }
+
+    def forward(self, spatial_feature):
+        spatial_feature_encoded = self.network(spatial_feature)
+        return spatial_feature_encoded
 
 class FullyConv(nn.Module):
     def __init__(self, screen_size, minimap_size):
@@ -34,6 +60,8 @@ class FullyConv(nn.Module):
         print("==FullyConv", screen_size, minimap_size)
 
         # feature_screen is assumed to have 24 channels.
+        # self.screen_encoder = SpatialEncoder(height=screen_size, width=screen_size, channel=32)
+
         self.screen_encoder = nn.Sequential(
             nn.Conv2d(39, 24, kernel_size=1, padding=0),
             nn.ReLU(),
@@ -46,7 +74,7 @@ class FullyConv(nn.Module):
         # After screen_encoder output (48 channels) we will concatenate the tiled
         # single_select and multi_select (each 32 channels) to get 112 channels.
         self.screen_input_encoder = nn.Sequential(
-            nn.Conv2d(112, 24, kernel_size=1, padding=0),
+            nn.Conv2d(112, 39, kernel_size=1, padding=0),
             nn.ReLU(),
         )
 
@@ -73,13 +101,13 @@ class FullyConv(nn.Module):
 
         # Output modules for spatial actions.
         self.screen = nn.Sequential(
-            nn.Conv2d(24, 1, kernel_size=1, padding=0)
+            nn.Conv2d(39, 1, kernel_size=1, padding=0)
         )
         self.minimap = nn.Sequential(
-            nn.Conv2d(7, 1, kernel_size=1, padding=0)
+            nn.Conv2d(16, 1, kernel_size=1, padding=0)
         )
         self.screen2 = nn.Sequential(
-            nn.Conv2d(24, 1, kernel_size=1, padding=0)
+            nn.Conv2d(39, 1, kernel_size=1, padding=0)
         )
         # Output dense layers for nonspatial “heads.”
         self.queued = nn.Linear(800, 2)
@@ -95,26 +123,33 @@ class FullyConv(nn.Module):
 
     def forward(self, feature_screen, feature_minimap, player, feature_units, game_loop, available_actions,
                 build_queue, single_select, multi_select, score_cumulative, act_history, memory_state, carry_state):
-        
+        print("feature_screen:", feature_screen.shape)
+        print("single_select:", single_select.shape)
+        print("multi_select:", multi_select.shape)
+        print("feature_minimap:", feature_minimap.shape)
+
         if feature_screen.dim() == 5:
-            # Assume shape (N, T, H, W, C) -- take first time step.
-            feature_screen = feature_screen[:, 0]
-        # If still channels-last (channels not at dim1), permute.
+            feature_screen = feature_screen.squeeze(0)
         if feature_screen.dim() == 4 and feature_screen.shape[1] != 39:
-            # In our case your preprocessor produces tensors of shape (H, W, 39)
-            # so after unsqueeze you get (1, H, W, 39). Permute to (1, 39, H, W):
+            # channel first (1, H, W, 39) -> (1, 39, H, W)
             feature_screen = feature_screen.permute(0, 3, 1, 2)
-        # Process feature_minimap similarly:
+
         if feature_minimap.dim() == 5:
-            feature_minimap = feature_minimap[:, 0]
+            feature_minimap = feature_minimap.squeeze(0)
         if feature_minimap.dim() == 4 and feature_minimap.shape[1] != 27:
             feature_minimap = feature_minimap.permute(0, 3, 1, 2)
+
         if single_select.dim() == 3:
             # For example, if single_select has shape (1, batch, 3), remove the extra dimension.
             single_select = single_select.squeeze(0)
         if multi_select.dim() == 3:
             multi_select = multi_select.squeeze(0)
-            
+        print()
+        print("feature_screen:", feature_screen.shape)
+        print("single_select:", single_select.shape)
+        print("multi_select:", multi_select.shape)
+        print("feature_minimap:", feature_minimap.shape)
+
         batch_size, _, H, W = feature_screen.size()
 
         # --- Convolutional (spatial) processing of the screen input ---
@@ -134,6 +169,9 @@ class FullyConv(nn.Module):
         feature_encoded_for_screen = self.screen_input_encoder(feature_encoded)  # (batch, 24, H, W)
 
         # Residual addition (note that feature_screen is the original input with 24 channels)
+        print()
+        print("feature_encoded_for_screen:", feature_encoded_for_screen.shape)
+        print("feature_screen:", feature_screen.shape)
         screen_input = F.relu(feature_encoded_for_screen + feature_screen)
 
         # --- Fully connected (nonspatial) branch ---
@@ -174,10 +212,10 @@ class FullyConv(nn.Module):
         unload_id_args = self.unload_id(feature_fc)
 
         return (fn_out,
-                screen_args, minimap_args, screen2_args, queued_args,
+                [screen_args, minimap_args, screen2_args, queued_args,
                 control_group_act_args, control_group_id_args,
                 select_point_act_args, select_add_args, select_unit_act_args, select_unit_id_args,
-                select_worker_args, build_queue_id_args, unload_id_args,
+                select_worker_args, build_queue_id_args, unload_id_args],
                 value, final_memory_state, final_carry_state)
 
 
