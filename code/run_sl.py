@@ -50,7 +50,7 @@ np.random.seed(args.seed)
 random.seed(args.seed)
 
 # Device configuration
-device = torch.device("cuda" if args.gpu_use and torch.cuda.is_available() else "cpu")
+device = torch.device("mps" if args.gpu_use and torch.backends.mps.is_available() else "cuda" if args.gpu_use and torch.cuda.is_available() else "cpu")
 print(device)
 if args.gpu_use and torch.cuda.is_available():
     torch.cuda.set_device(0)
