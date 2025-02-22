@@ -284,24 +284,16 @@ dataset = TrajectoryDataset(num_trajectories=1000)
 # Here we set batch_size=1 because each sample is already a full trajectory.
 dataloader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=4, drop_last=True)
 
-# Create the model
 model = network.make_model(args.model_name)
 model.to(device)
 
-# If you have a pretrained model, load its weights
 if args.pretrained_model is not None:
     model.load_state_dict(torch.load(os.path.join(args.workspace_path, "Models", args.pretrained_model)))
 
-# Setup TensorBoard writer
 writer = SummaryWriter(log_dir=os.path.join(args.workspace_path, "tensorboard", "supervised_learning"))
-
-# Define our loss criterion – we use CrossEntropyLoss for both the function id and argument losses.
 criterion = nn.CrossEntropyLoss()
-
-# Setup optimizer
+criterion_args = nn.CrossEntropyLoss(ignore_index=-1)
 optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
-
-# List of argument types (for iterating in order)
 arg_types_list = list(actions.TYPES)
 
 def supervised_replay(batch_sample, memory_state, carry_state):
@@ -340,15 +332,19 @@ def supervised_replay(batch_sample, memory_state, carry_state):
         # 'args_out': a dict mapping each arg_type to logits [1, arg_dim],
         # 'final_memory_state', 'final_carry_state'
         output = model(**input_dict)
-        fn_logits = output['fn_out']  # shape [1, num_fn]
-        args_out = output['args_out']  # dict mapping argument type -> [1, arg_size]
-        memory_state = output['final_memory_state']
-        carry_state = output['final_carry_state']
+        for i, o in enumerate(output):
+            print("output", i, len(o))
+
+        fn_logits = output[0]  # shape [1, num_fn]
+        args_out = output[1]  # dict mapping argument type -> [1, arg_size]
+        memory_state = output[3]
+        carry_state = output[4]
 
         fn_logits_list.append(fn_logits.squeeze(0))
-        for arg in arg_types_list:
-            # Assume every arg exists in args_out.
-            arg_logits_dict[arg].append(args_out[arg].squeeze(0))
+
+        for i, arg in enumerate(arg_types_list):
+            print(i, arg)
+            arg_logits_dict[arg].append(args_out[i].squeeze(0))
 
     # Stack all predictions: resulting shapes [T, num_fn] and for each arg [T, arg_dim]
     fn_logits_tensor = torch.stack(fn_logits_list, dim=0)
@@ -364,16 +360,21 @@ def supervised_replay(batch_sample, memory_state, carry_state):
     gt_args = batch_sample["args_ids"].to(device)  # shape [T, num_args]
 
     # Compute function id loss.
+    # First, mask unavailable actions.
     masked_fn_logits = mask_unavailable_actions(available_actions, fn_logits_tensor)
-    fn_loss = criterion(masked_fn_logits, gt_fn)
+    # Flatten the logits and targets along batch and time.
+    # New shape: [batch * T, num_fn] and [batch * T] respectively.
+    masked_fn_logits_flat = masked_fn_logits.view(-1, masked_fn_logits.size(-1))  # e.g. [8, 573]
+    gt_fn_flat = gt_fn.view(-1)  # e.g. [8]
+    fn_loss = criterion(masked_fn_logits_flat, gt_fn_flat)
 
     # Compute argument losses.
     arg_loss = 0
     for idx, arg in enumerate(arg_types_list):
-        # gt for current arg is in gt_args[:, idx]
-        target = gt_args[:, idx]
-        logits = arg_logits_dict[arg]
-        arg_loss += criterion(logits, target)
+        # gt for current arg is in gt_args[:, :, idx] (shape: [batch, T])
+        target = gt_args[:, :, idx].view(-1)
+        logits = arg_logits_dict[arg].view(-1, arg_logits_dict[arg].size(-1))
+        arg_loss += criterion_args(logits, target)
     
     total_loss = fn_loss + arg_loss
     return total_loss, memory_state, carry_state
@@ -407,15 +408,15 @@ def supervised_train(dataloader, training_episodes):
                 segment = { key: batch_sample[key][:, t:t+step_length] for key in batch_sample }
                 optimizer.zero_grad()
                 loss, memory_state, carry_state = supervised_replay(segment, memory_state, carry_state)
-                print("loss: {:.4f}".format(loss.item()))
+                # print("loss: {:.4f}".format(loss.item()))
                 loss.backward()
                 optimizer.step()
 
                 training_step += 1
                 print("training_step: {} loss: {:.4f}".format(training_step, loss.item()))
-                if training_step % 2 == 0:
+                if training_step % 10 == 0:
                     writer.add_scalar("total_loss", loss.item(), training_step)
-                if training_step % 2 == 0:
+                if training_step % 10 == 0:
                     save_path = os.path.join(args.workspace_path, "Models", "supervised_model_{}".format(training_step))
                     torch.save(model.state_dict(), save_path)
                 # (Optional) free GPU memory, if necessary.
