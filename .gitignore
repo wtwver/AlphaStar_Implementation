@@ -1,5 +1,5 @@
 *.hkl
-*.SC2Replay*
+replay/
 *tensorboard*
 *.pyc
 Models/
