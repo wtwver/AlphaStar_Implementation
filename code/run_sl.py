@@ -171,7 +171,6 @@ class TrajectoryDataset(Dataset):
         try:
             with gzip.open(args.replay_hkl_file_path + replay_file) as f:
                 replay = pickle.load(f)
-            print(replay_file)
         except Exception as e:
             print(e)
             # If failed, pick another sample recursively (or return zeros)
@@ -309,7 +308,7 @@ def supervised_replay(batch_sample, memory_state, carry_state):
 
     # Process the trajectory time step by time step.
     for t in range(T):
-        print(batch_sample["feature_screen"][t].shape)
+        print(batch_sample["feature_screen"][t].shape) if debug else None
 
         input_dict = {
             "feature_screen": batch_sample["feature_screen"][t].unsqueeze(0),  
@@ -333,7 +332,7 @@ def supervised_replay(batch_sample, memory_state, carry_state):
         # 'final_memory_state', 'final_carry_state'
         output = model(**input_dict)
         for i, o in enumerate(output):
-            print("output", i, len(o))
+            print("output", i, len(o)) if debug else None
 
         fn_logits = output[0]  # shape [1, num_fn]
         args_out = output[1]  # dict mapping argument type -> [1, arg_size]
@@ -343,7 +342,7 @@ def supervised_replay(batch_sample, memory_state, carry_state):
         fn_logits_list.append(fn_logits.squeeze(0))
 
         for i, arg in enumerate(arg_types_list):
-            print(i, arg)
+            print(i, arg) if debug else None
             arg_logits_dict[arg].append(args_out[i].squeeze(0))
 
     # Stack all predictions: resulting shapes [T, num_fn] and for each arg [T, arg_dim]
@@ -400,9 +399,9 @@ def supervised_train(dataloader, training_episodes):
             # Unroll over the trajectory in chunks of step_length.
             for t in range(0, T_total, step_length):
                 # Make sure we have a full step_length (skip incomplete segments).
-                print('t: {}, step_length: {}, T_total: {}'.format(t, step_length, T_total))
+                print('t: {}, step_length: {}, T_total: {}'.format(t, step_length, T_total)) if debug else None
                 if t + step_length > T_total:
-                    print('t + step_length > T_total')
+                    print('t + step_length > T_total') if debug else None
                     break
                 # Slice the segment.
                 segment = { key: batch_sample[key][:, t:t+step_length] for key in batch_sample }
@@ -413,10 +412,10 @@ def supervised_train(dataloader, training_episodes):
                 optimizer.step()
 
                 training_step += 1
-                print("training_step: {} loss: {:.4f}".format(training_step, loss.item()))
-                if training_step % 10 == 0:
+                print("training_step: {} loss: {:.4f}".format(training_step, loss.item())) if debug else None
+                if training_step % 100 == 0:
                     writer.add_scalar("total_loss", loss.item(), training_step)
-                if training_step % 10 == 0:
+                if training_step % 1000 == 0:
                     save_path = os.path.join(args.workspace_path, "Models", "supervised_model_{}".format(training_step))
                     torch.save(model.state_dict(), save_path)
                 # (Optional) free GPU memory, if necessary.
@@ -426,4 +425,5 @@ def main():
     supervised_train(dataloader, args.training_episode)
 
 if __name__ == "__main__":
+    debug = 0
     main()

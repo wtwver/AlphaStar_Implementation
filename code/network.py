@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from pysc2.lib import actions
 # _NUM_FUNCTIONS is defined based on the available actions.
 _NUM_FUNCTIONS = len(actions.FUNCTIONS)
+debug = 0
 
 class SpatialEncoder(nn.Module):
     def __init__(self, height, width, channel):
@@ -123,10 +124,10 @@ class FullyConv(nn.Module):
 
     def forward(self, feature_screen, feature_minimap, player, feature_units, game_loop, available_actions,
                 build_queue, single_select, multi_select, score_cumulative, act_history, memory_state, carry_state):
-        print("feature_screen:", feature_screen.shape)
-        print("single_select:", single_select.shape)
-        print("multi_select:", multi_select.shape)
-        print("feature_minimap:", feature_minimap.shape)
+        print("feature_screen:", feature_screen.shape) if debug else None
+        print("single_select:", single_select.shape) if debug else None
+        print("multi_select:", multi_select.shape) if debug else None
+        print("feature_minimap:", feature_minimap.shape) if debug else None
 
         if feature_screen.dim() == 5:
             feature_screen = feature_screen.squeeze(0)
@@ -144,11 +145,11 @@ class FullyConv(nn.Module):
             single_select = single_select.squeeze(0)
         if multi_select.dim() == 3:
             multi_select = multi_select.squeeze(0)
-        print()
-        print("feature_screen:", feature_screen.shape)
-        print("single_select:", single_select.shape)
-        print("multi_select:", multi_select.shape)
-        print("feature_minimap:", feature_minimap.shape)
+        print() if debug else None
+        print("feature_screen:", feature_screen.shape) if debug else None
+        print("single_select:", single_select.shape) if debug else None
+        print("multi_select:", multi_select.shape) if debug else None
+        print("feature_minimap:", feature_minimap.shape) if debug else None
 
         batch_size, _, H, W = feature_screen.size()
 
@@ -169,9 +170,9 @@ class FullyConv(nn.Module):
         feature_encoded_for_screen = self.screen_input_encoder(feature_encoded)  # (batch, 24, H, W)
 
         # Residual addition (note that feature_screen is the original input with 24 channels)
-        print()
-        print("feature_encoded_for_screen:", feature_encoded_for_screen.shape)
-        print("feature_screen:", feature_screen.shape)
+        print() if debug else None
+        print("feature_encoded_for_screen:", feature_encoded_for_screen.shape) if debug else None
+        print("feature_screen:", feature_screen.shape) if debug else None
         screen_input = F.relu(feature_encoded_for_screen + feature_screen)
 
         # --- Fully connected (nonspatial) branch ---
