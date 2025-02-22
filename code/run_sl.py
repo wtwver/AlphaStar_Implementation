@@ -317,9 +317,10 @@ def supervised_replay(batch_sample, memory_state, carry_state):
 
     # Process the trajectory time step by time step.
     for t in range(T):
-        # Prepare input dictionary. We unsqueeze the t-th sample to add a batch dimension.
+        print(batch_sample["feature_screen"][t].shape)
+
         input_dict = {
-            "feature_screen": batch_sample["feature_screen"][t].unsqueeze(0),  # shape [1, H, W, C] or similar
+            "feature_screen": batch_sample["feature_screen"][t].unsqueeze(0),  
             "feature_minimap": batch_sample["feature_minimap"][t].unsqueeze(0),
             "player": batch_sample["player"][t].unsqueeze(0),
             "feature_units": batch_sample["feature_units"][t].unsqueeze(0),
@@ -391,7 +392,6 @@ def supervised_train(dataloader, training_episodes):
                 for key, value in sample.items()
             }
             # Get the trajectory length, assume it is the first dimension.
-            print(batch_sample["feature_screen"].shape)
             T_total = batch_sample["feature_screen"].shape[1]
             # Initialize latent states (assume dimensions [1, state_dim])
             memory_state = torch.zeros(1, 1024, device=device)
@@ -404,7 +404,7 @@ def supervised_train(dataloader, training_episodes):
                     print('t + step_length > T_total')
                     break
                 # Slice the segment.
-                segment = {key: batch_sample[key][t:t+step_length] for key in batch_sample}
+                segment = { key: batch_sample[key][:, t:t+step_length] for key in batch_sample }
                 optimizer.zero_grad()
                 loss, memory_state, carry_state = supervised_replay(segment, memory_state, carry_state)
                 print("loss: {:.4f}".format(loss.item()))
