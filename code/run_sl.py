@@ -5,6 +5,7 @@ import numpy as np
 from collections import defaultdict
 import gzip
 import pickle
+from tqdm import tqdm
 
 import torch
 import torch.nn as nn
@@ -366,15 +367,19 @@ def supervised_replay(batch_sample, memory_state, carry_state):
     masked_fn_logits_flat = masked_fn_logits.view(-1, masked_fn_logits.size(-1))  # e.g. [8, 573]
     gt_fn_flat = gt_fn.view(-1)  # e.g. [8]
     fn_loss = criterion(masked_fn_logits_flat, gt_fn_flat)
-
+    # print('fn_loss: {:.4f}'.format(fn_loss.item()))
     # Compute argument losses.
     arg_loss = 0
     for idx, arg in enumerate(arg_types_list):
         # gt for current arg is in gt_args[:, :, idx] (shape: [batch, T])
         target = gt_args[:, :, idx].view(-1)
         logits = arg_logits_dict[arg].view(-1, arg_logits_dict[arg].size(-1))
-        arg_loss += criterion_args(logits, target)
-    
+        print(f'target {target}, logits {logits}')
+        if (target != -1).sum().item() > 0:
+            tmp = criterion_args(logits, target)
+            if tmp is not None and not torch.isnan(tmp):
+                arg_loss += tmp
+
     total_loss = fn_loss + arg_loss
     return total_loss, memory_state, carry_state
 
@@ -383,12 +388,12 @@ def supervised_train(dataloader, training_episodes):
     # You can choose a fixed step length for unrolling an episode.
     step_length = 8
     model.train()
-    for epoch in range(training_episodes):
+    for epoch in tqdm(range(training_episodes), desc='Training epochs'):
         print("Epoch: {}".format(epoch))
         for sample in dataloader:
             # sample is a dict with numpy arrays; convert them to torch tensors.
             batch_sample = {
-                key: torch.tensor(value, device=device)
+                key: torch.tensor(value.clone().detach(), device=device)
                 for key, value in sample.items()
             }
             # Get the trajectory length, assume it is the first dimension.
@@ -407,7 +412,6 @@ def supervised_train(dataloader, training_episodes):
                 segment = { key: batch_sample[key][:, t:t+step_length] for key in batch_sample }
                 optimizer.zero_grad()
                 loss, memory_state, carry_state = supervised_replay(segment, memory_state, carry_state)
-                # print("loss: {:.4f}".format(loss.item()))
                 loss.backward()
                 optimizer.step()
 
@@ -415,7 +419,8 @@ def supervised_train(dataloader, training_episodes):
                 print("training_step: {} loss: {:.4f}".format(training_step, loss.item())) if debug else None
                 if training_step % 100 == 0:
                     writer.add_scalar("total_loss", loss.item(), training_step)
-                if training_step % 1000 == 0:
+                    print("loss: {:.4f}".format(loss.item()))
+                if training_step % 5000 == 0:
                     save_path = os.path.join(args.workspace_path, "Models", "supervised_model_{}".format(training_step))
                     torch.save(model.state_dict(), save_path)
                 # (Optional) free GPU memory, if necessary.

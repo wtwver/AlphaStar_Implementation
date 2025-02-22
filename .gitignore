@@ -2,3 +2,4 @@
 *.SC2Replay*
 *tensorboard*
 *.pyc
+Models/
