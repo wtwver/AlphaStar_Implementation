@@ -66,9 +66,10 @@ class Trajectory(object):
 			return self.away_BU
 
 	def generate_trajectory(self):
+
 		function_dict = {}
 		for _FUNCTION in actions._FUNCTIONS:
-		    function_dict[_FUNCTION.ability_id] = _FUNCTION.name
+			function_dict[_FUNCTION.ability_id] = _FUNCTION.name
 
 		race_list = ['Terran', 'Zerg', 'Protoss']
 
@@ -77,17 +78,21 @@ class Trajectory(object):
 		sc2_proc = run_config.start()
 		controller = sc2_proc.controller
 
-		replay_files = [ f for f in os.listdir(self.replay_path) if f.endswith('.SC2Replay') ]
+		replay_files = sorted([ f for f in os.listdir(self.replay_path) if f.endswith('.SC2Replay') ])
 		print(replay_files)
 		assert len(replay_files) != 0, "No replay file is found"
 
 
 		for replay_file in replay_files:
 			try: 
+				saving_file =  arguments.saving_path + '/' + replay_file + '.pkl'
+				if os.path.exists(saving_file):
+					continue
+				print('===', saving_file, 'not existed')
+
 				replay_data = run_config.replay_data(self.replay_path + '/' + replay_file)
 				ping = controller.ping()
 				info = controller.replay_info(replay_data)
-				print(info)
 
 				player0_race = info.player_info[0].player_info.race_actual
 				player0_mmr = info.player_info[0].player_mmr
@@ -98,7 +103,7 @@ class Trajectory(object):
 				if (home_race == player0_race):
 					pass
 				else:
-					print("player0_race fail")
+					print("===player0_race fail")
 					continue
 
 				if (player0_mmr >= self.replay_filter):
@@ -273,7 +278,7 @@ class Trajectory(object):
 
 						self.home_score_cumulative = []
 
-						with gzip.open(arguments.saving_path + '/' + replay_file + '.pkl', 'wb') as f:
+						with gzip.open(saving_file, 'wb') as f:
 							pickle.dump(data, f)
 							print("===pickle saved", f)
 
