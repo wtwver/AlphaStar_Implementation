@@ -88,7 +88,7 @@ class Trajectory(object):
 				saving_file =  arguments.saving_path + '/' + replay_file + '.pkl'
 				if os.path.exists(saving_file):
 					continue
-				print('===', saving_file, 'not existed')
+				print(f'===processing {saving_file}')
 
 				replay_data = run_config.replay_data(self.replay_path + '/' + replay_file)
 				ping = controller.ping()
@@ -103,7 +103,7 @@ class Trajectory(object):
 				if (home_race == player0_race):
 					pass
 				else:
-					print("===player0_race fail")
+					print(f"===player0_race fail {home_race} is not {player0_race}")
 					continue
 
 				if (player0_mmr >= self.replay_filter):
@@ -120,7 +120,7 @@ class Trajectory(object):
 				if (away_race == player1_race):
 					pass
 				else:
-					print("===player1_race fail ")
+					print(f"===player1_race fail {away_race} is not {player1_race}")
 					continue
 
 				if (player1_mmr >= self.replay_filter):
@@ -225,8 +225,6 @@ class Trajectory(object):
 						else:
 							continue
 					
-					#print("")
-
 					done = 0
 					if _state == StepType.LAST:
 						done = 1
