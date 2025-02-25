@@ -274,6 +274,173 @@ class MultiHeadAttention(nn.Module):
         output = self.dropout(output)
         return output, attn_weights
 
+class RelationalFullyConv(nn.Module):
+    def __init__(self, screen_size, minimap_size):
+        super(RelationalFullyConv, self).__init__()
+
+        self.screen_size = screen_size
+        self.minimap_size = minimap_size
+
+        self.network_scale = screen_size // 32
+
+        # Location embeddings
+        self._conv_out_size_screen = screen_size // 2  # Since stride=2 in screen_encoder
+        self._locs_screen = torch.arange(0, self._conv_out_size_screen**2, dtype=torch.float32) / (self._conv_out_size_screen**2)
+        self._locs_screen = self._locs_screen.view(1, -1, 1)
+
+        self.screen_encoder = nn.Sequential(
+            nn.Conv2d(39, 47, kernel_size=3, stride=2, padding=1),
+            nn.ReLU()
+        )
+
+        self.attention_screen_1 = MultiHeadAttention(48, 4)
+        self.layernorm_screen_1 = nn.LayerNorm(48)
+        self.dropout_screen_1 = nn.Dropout(0.1)
+
+        self.attention_screen_2 = MultiHeadAttention(48, 4)
+        self.layernorm_screen_2 = nn.LayerNorm(48)
+        self.dropout_screen_2 = nn.Dropout(0.1)
+
+        self.screen_decoder = nn.Sequential(
+            nn.ConvTranspose2d(48, 48, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.ReLU()
+        )
+
+        self.single_select_encoder = nn.Sequential(
+            nn.Linear(3, 16),
+            nn.ReLU()
+        )
+
+        self.act_history_encoder = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(16 * _NUM_FUNCTIONS, 64),
+            nn.ReLU()
+        )
+
+        # Feature encoder to match feature_screen channels for residual addition
+        self.feature_encoder = nn.Conv2d(48 + 16 + 64, 39, kernel_size=1)
+
+        # Fully connected layers for flattened features
+        self.feature_fc = nn.Sequential(
+            nn.Linear((48 + 16 + 64) * screen_size * screen_size, 800),
+            nn.ReLU(),
+            nn.Linear(800, 800),
+            nn.ReLU(),
+            nn.Linear(800, 800),
+            nn.ReLU(),
+            nn.Linear(800, 800),
+            nn.ReLU(),
+            nn.Linear(800, 800),
+            nn.ReLU()
+        )
+
+        self.fn_out = nn.Linear(800, _NUM_FUNCTIONS)
+        self.dense2 = nn.Linear(800, 1)
+
+        # Output modules for spatial actions
+        self.screen = nn.Sequential(
+            nn.Conv2d(39, 1, kernel_size=1),
+            nn.Flatten()
+        )
+        self.minimap = nn.Sequential(
+            nn.Conv2d(27, 1, kernel_size=1),
+            nn.Flatten()
+        )
+        self.screen2 = nn.Sequential(
+            nn.Conv2d(39, 1, kernel_size=1),
+            nn.Flatten()
+        )
+
+        # Output dense layers for nonspatial "heads"
+        self.queued = nn.Linear(800, 2)
+        self.control_group_act = nn.Linear(800, 5)
+        self.control_group_id = nn.Linear(800, 10)
+        self.select_point_act = nn.Linear(800, 4)
+        self.select_add = nn.Linear(800, 2)
+        self.select_unit_act = nn.Linear(800, 4)
+        self.select_unit_id = nn.Linear(800, 500)
+        self.select_worker = nn.Linear(800, 4)
+        self.build_queue_id = nn.Linear(800, 10)
+        self.unload_id = nn.Linear(800, 500)
+
+    def forward(self, feature_screen, feature_minimap, player, feature_units, game_loop, available_actions,
+                build_queue, single_select, multi_select, score_cumulative, act_history, memory_state, carry_state):
+        batch_size = feature_screen.size(0)
+
+        # Screen encoding
+        feature_screen_encoded = self.screen_encoder(feature_screen)  # Shape: (batch, 47, H/2, W/2)
+        feature_screen_encoded_attention = feature_screen_encoded.permute(0, 2, 3, 1).view(batch_size, -1, 47)  # Shape: (batch, (H/2)*(W/2), 47)
+        locs_screen = self._locs_screen.expand(batch_size, -1, 1)  # Shape: (batch, (H/2)*(W/2), 1)
+        feature_screen_encoded_locs = torch.cat([feature_screen_encoded_attention, locs_screen], dim=2)  # Shape: (batch, (H/2)*(W/2), 48)
+
+        # First attention block
+        attention_feature_screen_1, _ = self.attention_screen_1(feature_screen_encoded_locs,
+                                                               feature_screen_encoded_locs,
+                                                               feature_screen_encoded_locs)
+        attention_feature_screen_1 = self.dropout_screen_1(attention_feature_screen_1)
+        attention_feature_screen_1 = self.layernorm_screen_1(feature_screen_encoded_locs + attention_feature_screen_1)
+
+        # Second attention block
+        attention_feature_screen_2, _ = self.attention_screen_2(attention_feature_screen_1,
+                                                               attention_feature_screen_1,
+                                                               attention_feature_screen_1)
+        attention_feature_screen_2 = self.dropout_screen_2(attention_feature_screen_2)
+        attention_feature_screen_2 = self.layernorm_screen_2(attention_feature_screen_1 + attention_feature_screen_2)
+
+        # Reshape and decode
+        relational_spatial = attention_feature_screen_2.view(batch_size, self._conv_out_size_screen,
+                                                            self._conv_out_size_screen, 48).permute(0, 3, 1, 2)  # Shape: (batch, 48, H/2, W/2)
+        relational_spatial = self.screen_decoder(relational_spatial)  # Shape: (batch, 48, H, W)
+
+        # Non-spatial encodings
+        single_select_encoded = self.single_select_encoder(single_select)  # Shape: (batch, 16)
+        single_select_encoded = single_select_encoded.view(batch_size, 16, 1, 1).expand(-1, 16, self.screen_size, self.screen_size)  # Shape: (batch, 16, H, W)
+
+        act_history_encoded = self.act_history_encoder(act_history)  # Shape: (batch, 64)
+        act_history_encoded = act_history_encoded.view(batch_size, 64, 1, 1).expand(-1, 64, self.screen_size, self.screen_size)  # Shape: (batch, 64, H, W)
+
+        # Concatenate spatial and tiled non-spatial features
+        feature_spatial = torch.cat([relational_spatial, single_select_encoded, act_history_encoded], dim=1)  # Shape: (batch, 128, H, W)
+        feature_spatial_encoded = self.feature_encoder(feature_spatial)  # Shape: (batch, 39, H, W)
+
+        # Residual addition with original feature_screen
+        screen_input = F.relu(feature_spatial_encoded + feature_screen)  # Shape: (batch, 39, H, W)
+
+        # Fully connected branch
+        feature_spatial_flatten = feature_spatial.view(batch_size, -1)  # Shape: (batch, 128*H*W)
+        feature_fc = self.feature_fc(feature_spatial_flatten)  # Shape: (batch, 800)
+
+        # Outputs
+        fn_out = self.fn_out(feature_fc)  # Shape: (batch, _NUM_FUNCTIONS)
+        value = self.dense2(feature_fc)  # Shape: (batch, 1)
+
+        # Spatial outputs with flattening
+        screen_args_out = self.screen(screen_input)  # Shape: (batch, H*W)
+        minimap_args_out = self.minimap(feature_minimap)  # Shape: (batch, minimap_H*minimap_W)
+        screen2_args_out = self.screen2(screen_input)  # Shape: (batch, H*W)
+
+        # Non-spatial outputs
+        queued_args_out = self.queued(feature_fc)
+        control_group_act_args_out = self.control_group_act(feature_fc)
+        control_group_id_args_out = self.control_group_id(feature_fc)
+        select_point_act_args_out = self.select_point_act(feature_fc)
+        select_add_args_out = self.select_add(feature_fc)
+        select_unit_act_args_out = self.select_unit_act(feature_fc)
+        select_unit_id_args_out = self.select_unit_id(feature_fc)
+        select_worker_args_out = self.select_worker(feature_fc)
+        build_queue_id_args_out = self.build_queue_id(feature_fc)
+        unload_id_args_out = self.unload_id(feature_fc)
+
+        final_memory_state = memory_state
+        final_carry_state = carry_state
+
+        return (fn_out,
+                [screen_args_out, minimap_args_out, screen2_args_out, queued_args_out,
+                 control_group_act_args_out, control_group_id_args_out,
+                 select_point_act_args_out, select_add_args_out, select_unit_act_args_out, select_unit_id_args_out,
+                 select_worker_args_out, build_queue_id_args_out, unload_id_args_out],
+                value, final_memory_state, final_carry_state)
+
 def make_model(name):
     """
     Returns an instance of the model based on the name.
