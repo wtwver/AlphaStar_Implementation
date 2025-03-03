@@ -10,6 +10,7 @@ replay_data = run_config.replay_data(replay_file_path)
 
 ping = controller.ping()
 info = controller.replay_info(replay_data)
+print(info)
 
 player0_race = info.player_info[0].player_info.race_actual
 player0_mmr = info.player_info[0].player_mmr

@@ -2,4 +2,5 @@
 replay/
 *tensorboard*
 *.pyc
+*.swp
 Models/

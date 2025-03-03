@@ -374,7 +374,7 @@ def supervised_replay(batch_sample, memory_state, carry_state):
         # gt for current arg is in gt_args[:, :, idx] (shape: [batch, T])
         target = gt_args[:, :, idx].view(-1)
         logits = arg_logits_dict[arg].view(-1, arg_logits_dict[arg].size(-1))
-        print(f'target {target}, logits {logits}')
+        # print(f'target {target}, logits {logits}')
         if (target != -1).sum().item() > 0:
             tmp = criterion_args(logits, target)
             if tmp is not None and not torch.isnan(tmp):
@@ -417,11 +417,11 @@ def supervised_train(dataloader, training_episodes):
 
                 training_step += 1
                 print("training_step: {} loss: {:.4f}".format(training_step, loss.item())) if debug else None
-                if training_step % 100 == 0:
+                if training_step % 250 == 0:
                     writer.add_scalar("total_loss", loss.item(), training_step)
                     print("loss: {:.4f}".format(loss.item()))
                 if training_step % 5000 == 0:
-                    save_path = os.path.join(args.workspace_path, "Models", "supervised_model_{}".format(training_step))
+                    save_path = os.path.join(args.workspace_path, "Models", f"supervised_model_{training_step}")
                     torch.save(model.state_dict(), save_path)
                 # (Optional) free GPU memory, if necessary.
                 torch.cuda.empty_cache()
