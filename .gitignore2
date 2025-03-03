@@ -1,7 +1,6 @@
 *.hkl
-replay*
+replay
 replay/
 *tensorboard*
 *.pyc
-*.swp
 Models/
