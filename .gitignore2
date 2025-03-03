@@ -1,6 +1,0 @@
-*.hkl
-replay
-replay/
-*tensorboard*
-*.pyc
-Models/
