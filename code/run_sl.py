@@ -52,6 +52,7 @@ random.seed(args.seed)
 # Device configuration
 device = torch.device("mps" if args.gpu_use and torch.backends.mps.is_available() else "cuda" if args.gpu_use and torch.cuda.is_available() else "cpu")
 print(device)
+
 if args.gpu_use and torch.cuda.is_available():
     torch.cuda.set_device(0)
 else:
@@ -282,7 +283,8 @@ class TrajectoryDataset(Dataset):
 # Create the dataset and dataloader.
 dataset = TrajectoryDataset(num_trajectories=1000)
 # Here we set batch_size=1 because each sample is already a full trajectory.
-dataloader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=4, drop_last=True)
+# dataloader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=4, drop_last=True)
+dataloader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=1, drop_last=True)
 
 model = network.make_model(args.model_name)
 model.to(device)
@@ -380,8 +382,7 @@ def supervised_replay(batch_sample, memory_state, carry_state):
             if tmp is not None and not torch.isnan(tmp):
                 arg_loss += tmp
 
-    total_loss = fn_loss + arg_loss
-    return total_loss, memory_state, carry_state
+    return fn_loss, arg_loss, memory_state, carry_state
 
 def supervised_train(dataloader, training_episodes):
     training_step = 0
@@ -411,15 +412,19 @@ def supervised_train(dataloader, training_episodes):
                 # Slice the segment.
                 segment = { key: batch_sample[key][:, t:t+step_length] for key in batch_sample }
                 optimizer.zero_grad()
-                loss, memory_state, carry_state = supervised_replay(segment, memory_state, carry_state)
+                fn_loss, args_loss, memory_state, carry_state = supervised_replay(segment, memory_state, carry_state)
+                loss = fn_loss + args_loss
                 loss.backward()
                 optimizer.step()
 
                 training_step += 1
                 print("training_step: {} loss: {:.4f}".format(training_step, loss.item())) if debug else None
                 if training_step % 250 == 0:
-                    writer.add_scalar("total_loss", loss.item(), training_step)
-                    print("loss: {:.4f}".format(loss.item()))
+                    writer.add_scalar("fn_loss", fn_loss, training_step)
+                    writer.add_scalar("args_loss", args_loss, training_step)
+                    writer.add_scalar("total_loss", loss, training_step)
+                    writer.flush()
+                    print("loss: {:.4f}, fn_loss: {:.4f}, args_loss: {:.4f}".format(loss, fn_loss, args_loss))
                 if training_step % 5000 == 0:
                     save_path = os.path.join(args.workspace_path, "Models", f"supervised_model_{training_step}")
                     torch.save(model.state_dict(), save_path)
