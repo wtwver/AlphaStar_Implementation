@@ -1,4 +1,6 @@
 *.hkl
+*.pt
+*.npy
 replay*
 replay/
 *tensorboard*
