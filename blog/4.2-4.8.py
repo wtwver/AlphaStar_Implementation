@@ -40,7 +40,7 @@ class Policy(nn.Module):
         return action_logits, state_values
 
 model = Policy()
-cce_loss = torch.nn.CrossEntropyLoss()
+
 optimizer = torch.optim.Adam(model.parameters(), lr=0.00001)
 max_episodes = 5000
 
@@ -97,9 +97,10 @@ def train_supervised_step(model: torch.nn.Module, optimizer: torch.optim.Optimiz
 
     # Run the model for one episode to collect training data
     action_logits, actions = run_supervised_episode(model)
+    action_logits = action_logits.squeeze(1)  # Shape changes from [258, 1, 4] to [258, 4]
 
-    # Calculate loss (logits, not probs)
-    loss = compute_supervised_loss(action_logits, actions)
+    cce_loss = torch.nn.CrossEntropyLoss()
+    loss = cce_loss(action_logits, actions)
 
     # Add regularization loss if desired
     regularization_loss = torch.tensor(0.0, device=action_logits.device)

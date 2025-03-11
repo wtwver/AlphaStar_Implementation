@@ -40,7 +40,7 @@ class FullyConv(nn.Module):
         """
         Fully convolutional network version.
 
-        Expected inputs (in PyTorch “channels-first” format):
+        Expected inputs (in PyTorch "channels-first" format):
           - feature_screen: (batch, 24, screen_size, screen_size)
           - feature_minimap: (batch, 7, minimap_size, minimap_size)
           - player: (batch, 11)
@@ -79,7 +79,7 @@ class FullyConv(nn.Module):
             nn.ReLU(),
         )
 
-        # Dense “encoders” for the nonspatial features.
+        # Dense "encoders" for the nonspatial features.
         self.single_select_encoder = nn.Sequential(
             nn.Linear(3, 32),
             nn.ReLU(),
@@ -110,7 +110,7 @@ class FullyConv(nn.Module):
         self.screen2 = nn.Sequential(
             nn.Conv2d(39, 1, kernel_size=1, padding=0)
         )
-        # Output dense layers for nonspatial “heads.”
+        # Output dense layers for nonspatial "heads."
         self.queued = nn.Linear(800, 2)
         self.control_group_act = nn.Linear(800, 5)
         self.control_group_id = nn.Linear(800, 10)
@@ -124,10 +124,11 @@ class FullyConv(nn.Module):
 
     def forward(self, feature_screen, feature_minimap, player, feature_units, game_loop, available_actions,
                 build_queue, single_select, multi_select, score_cumulative, act_history, memory_state, carry_state):
-        print("feature_screen:", feature_screen.shape) if debug else None
-        print("single_select:", single_select.shape) if debug else None
-        print("multi_select:", multi_select.shape) if debug else None
-        print("feature_minimap:", feature_minimap.shape) if debug else None
+        if debug :
+            print("feature_screen:", feature_screen.shape) 
+            print("single_select:", single_select.shape) 
+            print("multi_select:", multi_select.shape)
+            print("feature_minimap:", feature_minimap.shape) 
 
         if feature_screen.dim() == 5:
             feature_screen = feature_screen.squeeze(0)
@@ -145,11 +146,12 @@ class FullyConv(nn.Module):
             single_select = single_select.squeeze(0)
         if multi_select.dim() == 3:
             multi_select = multi_select.squeeze(0)
-        print() if debug else None
-        print("feature_screen:", feature_screen.shape) if debug else None
-        print("single_select:", single_select.shape) if debug else None
-        print("multi_select:", multi_select.shape) if debug else None
-        print("feature_minimap:", feature_minimap.shape) if debug else None
+
+        if debug :
+            print("feature_screen:", feature_screen.shape) 
+            print("single_select:", single_select.shape) 
+            print("multi_select:", multi_select.shape)
+            print("feature_minimap:", feature_minimap.shape) 
 
         batch_size, _, H, W = feature_screen.size()
 
@@ -277,14 +279,12 @@ class MultiHeadAttention(nn.Module):
 class RelationalFullyConv(nn.Module):
     def __init__(self, screen_size, minimap_size):
         super(RelationalFullyConv, self).__init__()
-
         self.screen_size = screen_size
         self.minimap_size = minimap_size
-
         self.network_scale = screen_size // 32
+        self._conv_out_size_screen = screen_size // 2  # Since stride=2 in screen_encoder
 
         # Location embeddings
-        self._conv_out_size_screen = screen_size // 2  # Since stride=2 in screen_encoder
         self._locs_screen = torch.arange(0, self._conv_out_size_screen**2, dtype=torch.float32) / (self._conv_out_size_screen**2)
         self._locs_screen = self._locs_screen.view(1, -1, 1)
 
@@ -343,7 +343,7 @@ class RelationalFullyConv(nn.Module):
             nn.Flatten()
         )
         self.minimap = nn.Sequential(
-            nn.Conv2d(27, 1, kernel_size=1),
+            nn.Conv2d(16, 1, kernel_size=1),
             nn.Flatten()
         )
         self.screen2 = nn.Sequential(
@@ -365,13 +365,61 @@ class RelationalFullyConv(nn.Module):
 
     def forward(self, feature_screen, feature_minimap, player, feature_units, game_loop, available_actions,
                 build_queue, single_select, multi_select, score_cumulative, act_history, memory_state, carry_state):
-        batch_size = feature_screen.size(0)
+        
+        if feature_screen.dim() == 5:
+            feature_screen = feature_screen.squeeze(0)
+        if feature_screen.dim() == 4 and feature_screen.shape[1] != 39:
+            # channel first (1, H, W, 39) -> (1, 39, H, W)
+            feature_screen = feature_screen.permute(0, 3, 1, 2)
+
+        if feature_minimap.dim() == 5:
+            feature_minimap = feature_minimap.squeeze(0)
+        if feature_minimap.dim() == 4 and feature_minimap.shape[1] != 27:
+            feature_minimap = feature_minimap.permute(0, 3, 1, 2)
+
+        if single_select.dim() == 3:
+            # For example, if single_select has shape (1, batch, 3), remove the extra dimension.
+            single_select = single_select.squeeze(0)
+        if multi_select.dim() == 3:
+            multi_select = multi_select.squeeze(0)
+        
+        batch_size, _, H, W = feature_screen.size()
+        # batch_size = feature_screen.size(0)
+
+        # Fix: Ensure act_history's batch dimension matches feature_screen's batch dimension
+        if act_history.dim() == 3 and act_history.size(0) == 1 and batch_size != 1:
+            act_history = act_history.squeeze(0)
+
+        # Preprocess act_history to ensure it is one-hot encoded and has shape 
+        # [batch_size, seq_length, _NUM_FUNCTIONS]
+        if act_history.dim() == 2 and act_history.size(-1) != _NUM_FUNCTIONS:
+            act_history = torch.nn.functional.one_hot(act_history.long(), num_classes=_NUM_FUNCTIONS).float()
+        elif act_history.dim() == 3 and act_history.size(-1) != _NUM_FUNCTIONS:
+            act_history = torch.nn.functional.one_hot(act_history.squeeze(-1).long(), num_classes=_NUM_FUNCTIONS).float()
+        
+        # Ensure act_history has the correct shape: [batch_size, 16, _NUM_FUNCTIONS]
+        if act_history.dim() == 2:
+            act_history = act_history.unsqueeze(1)
+        if act_history.size(1) != 16:
+            if act_history.size(1) < 16:
+                padding = torch.zeros(batch_size, 16 - act_history.size(1), _NUM_FUNCTIONS, 
+                                        device=act_history.device)
+                act_history = torch.cat([act_history, padding], dim=1)
+            else:
+                act_history = act_history[:, :16, :]
 
         # Screen encoding
         feature_screen_encoded = self.screen_encoder(feature_screen)  # Shape: (batch, 47, H/2, W/2)
         feature_screen_encoded_attention = feature_screen_encoded.permute(0, 2, 3, 1).view(batch_size, -1, 47)  # Shape: (batch, (H/2)*(W/2), 47)
+
+        num_locations = feature_screen_encoded_attention.size(1)
+        self._locs_screen = torch.arange(0, num_locations, dtype=torch.float32, device=feature_screen.device) / num_locations
+        self._locs_screen = self._locs_screen.view(1, -1, 1).expand(batch_size, -1, 1)  # Shape: (batch, (H/2)*(W/2), 1)
+        feature_screen_encoded_locs = torch.cat([feature_screen_encoded_attention, self._locs_screen], dim=2)  # Shape: (batch, (H/2)*(W/2), 48)
+
+
         locs_screen = self._locs_screen.expand(batch_size, -1, 1)  # Shape: (batch, (H/2)*(W/2), 1)
-        feature_screen_encoded_locs = torch.cat([feature_screen_encoded_attention, locs_screen], dim=2)  # Shape: (batch, (H/2)*(W/2), 48)
+        # feature_screen_encoded_locs = torch.cat([feature_screen_encoded_attention, locs_screen], dim=2)  # Shape: (batch, (H/2)*(W/2), 48)
 
         # First attention block
         attention_feature_screen_1, _ = self.attention_screen_1(feature_screen_encoded_locs,
@@ -388,19 +436,24 @@ class RelationalFullyConv(nn.Module):
         attention_feature_screen_2 = self.layernorm_screen_2(attention_feature_screen_1 + attention_feature_screen_2)
 
         # Reshape and decode
-        relational_spatial = attention_feature_screen_2.view(batch_size, self._conv_out_size_screen,
-                                                            self._conv_out_size_screen, 48).permute(0, 3, 1, 2)  # Shape: (batch, 48, H/2, W/2)
+        # Calculate the actual spatial dimensions based on the input size
+        spatial_dim = int(math.sqrt(attention_feature_screen_2.size(1)))
+        relational_spatial = attention_feature_screen_2.view(batch_size, spatial_dim, spatial_dim, 48).permute(0, 3, 1, 2)  # Shape: (batch, 48, H/2, W/2)
         relational_spatial = self.screen_decoder(relational_spatial)  # Shape: (batch, 48, H, W)
 
         # Non-spatial encodings
         single_select_encoded = self.single_select_encoder(single_select)  # Shape: (batch, 16)
-        single_select_encoded = single_select_encoded.view(batch_size, 16, 1, 1).expand(-1, 16, self.screen_size, self.screen_size)  # Shape: (batch, 16, H, W)
-
+        act_history = act_history.float()
         act_history_encoded = self.act_history_encoder(act_history)  # Shape: (batch, 64)
-        act_history_encoded = act_history_encoded.view(batch_size, 64, 1, 1).expand(-1, 64, self.screen_size, self.screen_size)  # Shape: (batch, 64, H, W)
 
-        # Concatenate spatial and tiled non-spatial features
-        feature_spatial = torch.cat([relational_spatial, single_select_encoded, act_history_encoded], dim=1)  # Shape: (batch, 128, H, W)
+        # Get the spatial dimensions from relational_spatial output
+        H_dec, W_dec = relational_spatial.size(2), relational_spatial.size(3)
+
+        single_select_encoded = single_select_encoded.view(batch_size, 16, 1, 1).expand(-1, 16, H_dec, W_dec)  # Shape: (batch, 16, H_dec, W_dec)
+        act_history_encoded = act_history_encoded.view(batch_size, 64, 1, 1).expand(-1, 64, H_dec, W_dec)  # Shape: (batch, 64, H_dec, W_dec)
+
+        # Concatenate spatial and tiled non-spatial features.
+        feature_spatial = torch.cat([relational_spatial, single_select_encoded, act_history_encoded], dim=1)  # Shape: (batch, 128, H_dec, W_dec)
         feature_spatial_encoded = self.feature_encoder(feature_spatial)  # Shape: (batch, 39, H, W)
 
         # Residual addition with original feature_screen
@@ -446,9 +499,10 @@ def make_model(name):
     Returns an instance of the model based on the name.
     Choose "fullyconv" or "relationalfullyconv".
     """
+    print("name:", name)
     if name == 'fullyconv':
         return FullyConv(screen_size=32, minimap_size=32)
     elif name == 'relationalfullyconv':
-        return RelationalFullyConv(screen_size=16, minimap_size=16)
+        return RelationalFullyConv(screen_size=32, minimap_size=32)
     else:
         raise ValueError("Unknown model name: {}".format(name))

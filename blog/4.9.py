@@ -75,9 +75,7 @@ def supervised_replay(self, replay_feature_screen_list, replay_feature_minimap_l
     for param in self.ActorCritic.parameters():
         regularization_loss += torch.norm(param)  # L2 regularization
     
-    # Total loss
     total_loss = fn_id_loss + arg_ids_loss + 1e-5 * regularization_loss
     
-    # Backward pass and optimization
     total_loss.backward()
     self.optimizer_sl.step()
