@@ -1,28 +1,38 @@
-supervised_optimizer = tf.keras.optimizers.Adam(learning_rate=0.00001)
+supervised_optimizer = torch.optim.Adam(model.parameters(), lr=0.00001)
 
-@tf.function
 def train_supervised_step(
-    model: tf.keras.Model, 
-    optimizer: tf.keras.optimizers.Optimizer) -> tf.Tensor:
-  """Runs a model training step."""
-
-  with tf.GradientTape() as tape:
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer) -> torch.Tensor:
+    """Runs a model training step."""
+    
+    # Set model to training mode
+    model.train()
+    
+    # Zero the gradients
+    optimizer.zero_grad()
+    
     # Run the model for one episode to collect training data
-    action_probs, actions = run_supervised_episode(model) 
-
-    # Convert training data to appropriate TF tensor shapes
-    action_probs, actions = [tf.expand_dims(x, 1) for x in [action_probs, actions]] 
-
-    # Calculating loss values to update our network
+    action_probs, actions = run_supervised_episode(model)
+    
+    # Convert training data to appropriate tensor shapes
+    action_probs = action_probs.unsqueeze(1)  # Adds dimension at index 1
+    actions = actions.unsqueeze(1)
+    
+    # Calculate loss
     loss = compute_supervised_loss(action_probs, actions)
     
-    regularization_loss = tf.reduce_sum(model.losses)
-    loss = loss + regularization_loss
-
-  # Compute the gradients from the loss
-  grads = tape.gradient(loss, model.trainable_variables)
-
-  # Apply the gradients to the model's parameters
-  supervised_optimizer.apply_gradients(zip(grads, model.trainable_variables))
+    # Add regularization loss if any (from model.weight_decay or custom regularization)
+    regularization_loss = torch.tensor(0.0, device=action_probs.device)
+    for param in model.parameters():
+        if param.requires_grad:
+            regularization_loss += torch.norm(param)  # L2 regularization example
     
-  return loss
+    total_loss = loss + regularization_loss
+    
+    # Backward pass: compute gradients
+    total_loss.backward()
+    
+    # Apply gradients
+    optimizer.step()
+    
+    return total_loss
